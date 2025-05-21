@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy ChirpStack on EC2 with Docker Compose in sa-east-1 (São Paulo)
+
+Parameters:
+  InstanceType:
+    Description: EC2 instance type (t3.small recommended minimum)
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t3.micro
+      - t3.small
+      - t3.medium
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair
+
+Mappings:
+  # Amazon Linux 2 AMI IDs per region (updated dynamically)
+  RegionMap:
+    sa-east-1:
+      AMI: ami-09e1669b87910270d
+
+Resources:
+  ChirpStackEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      KeyName: !Ref KeyName
+      SecurityGroups:
+        - !Ref ChirpStackSecurityGroup
+      Tags:
+        - Key: Name
+          Value: ChirpStack-Server
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          yum install -y git
+          amazon-linux-extras install docker -y
+
+          # Fetch credentials from SSM
+          MQTT_USER=$(aws ssm get-parameter \
+            --name "/chirpstack/mqtt/username" \
+            --with-decryption \
+            --region ${AWS::Region} \
+            --query Parameter.Value \
+            --output text)
+          
+          MQTT_PASS=$(aws ssm get-parameter \
+            --name "/chirpstack/mqtt/password" \
+            --with-decryption \
+            --region ${AWS::Region} \
+            --query Parameter.Value \
+            --output text)
+          
+          # Write to environment file
+          cat <<EOF > /home/ec2-user/mqtt.env
+          MQTT_BROKER_HOST=mosquitto
+          MQTT_USERNAME=$MQTT_USER
+          MQTT_PASSWORD=$MQTT_PASS
+          EOF
+
+          service docker start
+          usermod -a -G docker ec2-user
+          curl -L "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+          cd /home/ec2-user
+
+          sudo -u ec2-user git clone https://github.com/chirpstack/chirpstack-docker.git
+          cd chirpstack-docker
+          sudo -u ec2-user docker-compose up -d
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: ["sts:AssumeRole"]
+      Policies:
+        - PolicyName: SSMAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ssm:GetParameter"
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/chirpstack/mqtt/*"
+
+  ChirpStackSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH and ChirpStack ports
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: udp
+          FromPort: 1700
+          ToPort: 1700
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 1883
+          ToPort: 1883
+          CidrIp: 0.0.0.0/0
+
+Outputs:
+  InstancePublicDNS:
+    Description: Public DNS of the EC2 instance
+    Value: !GetAtt ChirpStackEC2.PublicDnsName
+  ChirpStackURL:
+    Description: ChirpStack web interface
+    Value: !Sub "http://${ChirpStackEC2.PublicDnsName}:8080"
