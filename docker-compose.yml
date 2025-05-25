@@ -5,8 +5,6 @@ services:
     restart: unless-stopped
     volumes:
       - ./configuration/chirpstack:/etc/chirpstack
-    env_file:
-      - mqtt.env  # Will use MQTT_BROKER_HOST=mosquitto
     depends_on:
       - postgres
       - mosquitto
