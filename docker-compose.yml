@@ -13,8 +13,6 @@ services:
       - redis
     environment:
       - MQTT_BROKER_HOST=mosquitto
-      - MQTT_USERNAME=your_username
-      - MQTT_PASSWORD=your_password
       - REDIS_HOST=redis
       - POSTGRESQL_HOST=postgres
     ports:

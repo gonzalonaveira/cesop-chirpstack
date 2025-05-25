@@ -43,27 +43,10 @@ Resources:
           yum update -y
           yum install -y git
           amazon-linux-extras install docker -y
-
-          # Fetch credentials from SSM
-          MQTT_USER=$(aws ssm get-parameter \
-            --name "/chirpstack/mqtt/username" \
-            --with-decryption \
-            --region ${AWS::Region} \
-            --query Parameter.Value \
-            --output text)
-          
-          MQTT_PASS=$(aws ssm get-parameter \
-            --name "/chirpstack/mqtt/password" \
-            --with-decryption \
-            --region ${AWS::Region} \
-            --query Parameter.Value \
-            --output text)
           
           # Write to environment file
           cat <<EOF > /home/ec2-user/mqtt.env
           MQTT_BROKER_HOST=mosquitto
-          MQTT_USERNAME=$MQTT_USER
-          MQTT_PASSWORD=$MQTT_PASS
           EOF
 
           service docker start
@@ -72,7 +55,7 @@ Resources:
           chmod +x /usr/local/bin/docker-compose
           cd /home/ec2-user
 
-          sudo -u ec2-user git clone https://github.com/chirpstack/chirpstack-docker.git
+          sudo -u ec2-user git clone https://github.com/gonzalonaveira/cesop-chirpstack.git
           cd chirpstack-docker
           sudo -u ec2-user docker-compose up -d
 
